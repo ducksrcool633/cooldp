@@ -31,8 +31,12 @@ expected_cols = [
     "CHANGES_FROM_NEGATIVE_TO_POSITIVE_BETWEEN_ET_HT"
 ]
 
-if spiral_df.shape[1] != len(expected_cols):
-    st.error(f"CSV has {spiral_df.shape[1]} columns but {len(expected_cols)} were expected.")
+# If extra columns exist, drop them
+if spiral_df.shape[1] > len(expected_cols):
+    st.warning(f"CSV has {spiral_df.shape[1]} columns, expected {len(expected_cols)}. Extra columns will be ignored.")
+    spiral_df = spiral_df.iloc[:, :len(expected_cols)]
+elif spiral_df.shape[1] < len(expected_cols):
+    st.error(f"CSV has {spiral_df.shape[1]} columns, expected {len(expected_cols)}. Cannot proceed.")
     st.stop()
 
 spiral_df.columns = expected_cols
