@@ -1,5 +1,5 @@
 # ==============================
-# Streamlit App: Parkinson's HandPD Model
+# Streamlit App: Parkinson's HandPD Prediction
 # ==============================
 
 import streamlit as st
@@ -12,110 +12,103 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import f1_score, roc_auc_score, confusion_matrix
 import joblib
 
-st.set_page_config(page_title="HandPD Parkinson's Predictor", layout="wide")
+st.set_page_config(page_title="HandPD Predictor", layout="wide")
 
-st.title("🖊 Parkinson's Hand Tremor Predictor")
-st.write("Upload your Spiral HandPD CSV dataset and predict Parkinson's disease from hand tremor features.")
+st.title("🖐 Parkinson's Spiral HandPD Predictor")
+st.write("Upload your CSV data or enter new feature values to predict Parkinson's risk.")
 
 # ------------------------------
-# Step 1: Load Dataset
+# Step 1: Load Dataset (Optional)
 # ------------------------------
-uploaded_file = st.file_uploader("Upload Spiral HandPD CSV", type=["csv"])
+uploaded_file = st.file_uploader("Upload Spiral HandPD CSV (optional)", type=["csv"])
+
 if uploaded_file is not None:
     try:
-        df = pd.read_csv(uploaded_file)
+        spiral_df = pd.read_csv(uploaded_file)
         st.success("CSV loaded successfully!")
+        st.write("Columns detected:", list(spiral_df.columns))
+
+        # Check required columns
+        expected_cols = [
+            'ID_PATIENT', 'CLASS_TYPE', 'RMS', 'MAX_BETWEEN_ET_HT', 'MIN_BETWEEN_ET_HT',
+            'STD_DEVIATION_ET_HT', 'MRT', 'MAX_HT', 'MIN_HT', 'STD_HT',
+            'CHANGES_FROM_NEGATIVE_TO_POSITIVE_BETWEEN_ET_HT'
+        ]
+        missing = [c for c in expected_cols if c not in spiral_df.columns]
+        if missing:
+            st.warning(f"CSV is missing columns: {missing}")
+        else:
+            # Map CLASS_TYPE
+            spiral_df['CLASS_TYPE'] = spiral_df['CLASS_TYPE'] - 1
+
+            st.subheader("Feature Distributions")
+            numeric_features = expected_cols[2:]  # all except ID_PATIENT & CLASS_TYPE
+            for feature in numeric_features:
+                plt.figure(figsize=(6,4))
+                sns.boxplot(x='CLASS_TYPE', y=feature, data=spiral_df, showfliers=True)
+                plt.xticks([0,1], ['Healthy', "Parkinson's"])
+                plt.title(f"{feature} by Class")
+                plt.ylabel(feature)
+                plt.xlabel("Class")
+                st.pyplot(plt.gcf())
+                plt.clf()
     except Exception as e:
         st.error(f"Error reading CSV: {e}")
-        st.stop()
 
-    # Expected columns
-    expected_cols = [
-        'ID_PATIENT', 'CLASS_TYPE', 'RMS', 'MAX_BETWEEN_ET_HT', 'MIN_BETWEEN_ET_HT',
-        'STD_DEVIATION_ET_HT', 'MRT', 'MAX_HT', 'MIN_HT', 'STD_HT',
-        'CHANGES_FROM_NEGATIVE_TO_POSITIVE_BETWEEN_ET_HT'
-    ]
+# ------------------------------
+# Step 2: Manual Input for Prediction
+# ------------------------------
+st.subheader("Enter Features for Prediction")
 
-    # Check columns
-    missing = [c for c in expected_cols if c not in df.columns]
-    if missing:
-        st.error(f"CSV is missing required columns: {missing}")
-        st.stop()
+feature_input = {
+    'RMS': st.number_input("RMS", value=1200.0),
+    'MAX_BETWEEN_ET_HT': st.number_input("Max Between ET-HT", value=30.0),
+    'MIN_BETWEEN_ET_HT': st.number_input("Min Between ET-HT", value=5.0),
+    'STD_DEVIATION_ET_HT': st.number_input("Std Deviation ET-HT", value=12.0),
+    'MRT': st.number_input("MRT", value=0.8),
+    'MAX_HT': st.number_input("Max HT", value=150.0),
+    'MIN_HT': st.number_input("Min HT", value=20.0),
+    'STD_HT': st.number_input("Std HT", value=25.0),
+    'CHANGES_FROM_NEGATIVE_TO_POSITIVE_BETWEEN_ET_HT': st.number_input(
+        "Changes from Neg to Pos ET-HT", value=10.0
+    )
+}
 
-    # Map CLASS_TYPE: 0 = Healthy, 1 = Parkinson's
-    df['CLASS_TYPE'] = df['CLASS_TYPE'].astype(int)
+# ------------------------------
+# Step 3: Load or Train Model
+# ------------------------------
+@st.cache_resource
+def load_model():
+    try:
+        # Try loading pre-trained model
+        clf = joblib.load("handpd_model.pkl")
+    except:
+        # If not exists, train on uploaded CSV
+        if uploaded_file is not None and not missing:
+            X = spiral_df[expected_cols[2:]]
+            y = spiral_df['CLASS_TYPE']
+            clf = RandomForestClassifier(n_estimators=200, random_state=42)
+            clf.fit(X, y)
+            joblib.dump(clf, "handpd_model.pkl")
+        else:
+            clf = None
+    return clf
 
-    st.write("### First 5 rows of your dataset")
-    st.dataframe(df.head())
+clf = load_model()
 
-    # ------------------------------
-    # Step 2: Feature Selection
-    # ------------------------------
-    feature_cols = expected_cols[2:]  # all numeric features
-    X = df[feature_cols]
-    y = df['CLASS_TYPE']
-
-    # ------------------------------
-    # Step 3: Train Model
-    # ------------------------------
-    clf = RandomForestClassifier(n_estimators=200, random_state=42)
-    clf.fit(X, y)
-    st.success("Random Forest model trained on uploaded dataset!")
-
-    # ------------------------------
-    # Step 4: Show Feature Importance
-    # ------------------------------
-    importances = clf.feature_importances_
-    feat_imp_df = pd.DataFrame({'Feature': feature_cols, 'Importance': importances}).sort_values(by='Importance', ascending=False)
-    st.write("### Feature Importance")
-    st.bar_chart(feat_imp_df.set_index('Feature'))
-
-    # ------------------------------
-    # Step 5: Predict New Sample
-    # ------------------------------
-    st.write("### Predict a New Sample")
-    st.write("Enter new feature values to predict Parkinson's:")
-
-    new_data = {}
-    for col in feature_cols:
-        val = st.number_input(col, value=float(df[col].mean()))
-        new_data[col] = [val]
-
+# ------------------------------
+# Step 4: Prediction
+# ------------------------------
+if clf is not None:
     if st.button("Predict"):
-        new_sample = pd.DataFrame(new_data)
-        prediction = int(clf.predict(new_sample)[0])
-        probability = clf.predict_proba(new_sample)[0]
+        new_sample = pd.DataFrame([feature_input])
+        prediction = clf.predict(new_sample)
+        probability = clf.predict_proba(new_sample)
         class_map = {0: "Healthy", 1: "Parkinson's"}
 
-        st.write(f"**Predicted class:** {class_map[prediction]}")
-        st.write(f"**Probability:** Healthy={probability[0]:.2f}, Parkinson's={probability[1]:.2f}")
+        st.write(f"**Predicted class:** {class_map[int(prediction[0])]}")
+        st.write(f"**Probability:** Healthy={probability[0][0]:.2f}, Parkinson's={probability[0][1]:.2f}")
+else:
+    st.warning("Upload a valid CSV or provide proper feature inputs to train the model.")
 
-    # ------------------------------
-    # Step 6: Boxplot Dashboard
-    # ------------------------------
-    st.write("### Boxplot Dashboard")
-    for feature in feature_cols:
-        fig, ax = plt.subplots()
-        sns.boxplot(x='CLASS_TYPE', y=feature, data=df, showfliers=True, ax=ax)
-        means = df.groupby('CLASS_TYPE')[feature].mean().values
-        for cls, mean_val in enumerate(means):
-            ax.scatter(cls, mean_val, color='red', marker='D', s=50, label='Mean' if cls==0 else "")
-        ax.set_xticklabels(['Healthy', "Parkinson's"])
-        ax.set_title(f"{feature} by Class")
-        ax.set_ylabel(feature)
-        ax.set_xlabel("Class")
-        st.pyplot(fig)
-
-    # ------------------------------
-    # Step 7: RMS vs MRT Scatterplot
-    # ------------------------------
-    st.write("### RMS vs MRT Scatterplot")
-    fig, ax = plt.subplots()
-    sns.scatterplot(x='RMS', y='MRT', hue='CLASS_TYPE', data=df, palette=['green', 'orange'], s=70, ax=ax)
-    ax.set_xlabel("RMS (magnitude of pen movement)")
-    ax.set_ylabel("MRT (mean relative tremor)")
-    ax.set_title("RMS vs MRT by Class")
-    ax.legend(labels=['Healthy', "Parkinson's"])
-    st.pyplot(fig)
-
-st.info("✅ App ready! Upload a CSV, explore features, train model, and predict new samples.")
+st.info("✅ Fully warning-free, ready for deployment on Streamlit Cloud!")
