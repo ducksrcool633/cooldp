@@ -2,19 +2,15 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
 
 st.title("Hand Tremor Prediction App")
 
-# Expected columns
 expected_cols = [
     'ID_PATIENT', 'CLASS_TYPE', 'RMS', 'MAX_BETWEEN_ET_HT',
     'MIN_BETWEEN_ET_HT', 'STD_DEVIATION_ET_HT', 'MRT', 'MAX_HT',
     'MIN_HT', 'STD_HT', 'CHANGES_FROM_NEGATIVE_TO_POSITIVE_BETWEEN_ET_HT'
 ]
-
-st.header("Upload CSV or Image")
 
 uploaded_file = st.file_uploader("Upload CSV or image", type=["csv","png","jpg","jpeg"])
 
@@ -22,6 +18,11 @@ if uploaded_file is not None:
     try:
         if uploaded_file.name.endswith(".csv"):
             df = pd.read_csv(uploaded_file)
+
+            # Trim extra columns if CSV has more than expected
+            if df.shape[1] > len(expected_cols):
+                st.warning(f"CSV has {df.shape[1]} columns but only {len(expected_cols)} expected. Extra columns will be ignored.")
+                df = df.iloc[:, :len(expected_cols)]
 
             # Automatically rename columns if count matches expected
             if df.shape[1] == len(expected_cols):
@@ -69,27 +70,7 @@ if uploaded_file is not None:
             st.dataframe(pred_df)
 
         else:
-            # Placeholder for image conversion
-            st.info("Image uploaded. Currently, image conversion to features is simulated.")
-
-            # Simulate feature extraction
-            dummy_features = np.random.rand(1, 9)  # 9 features matching numeric columns
-            dummy_X = pd.DataFrame(dummy_features, columns=[
-                'RMS','MAX_BETWEEN_ET_HT','MIN_BETWEEN_ET_HT',
-                'STD_DEVIATION_ET_HT','MRT','MAX_HT','MIN_HT','STD_HT',
-                'CHANGES_FROM_NEGATIVE_TO_POSITIVE_BETWEEN_ET_HT'
-            ])
-
-            # Train dummy model on dummy data
-            dummy_y = np.array([0,1,0,1,0,1,0,1,0,1])
-            clf = RandomForestClassifier(n_estimators=100, random_state=42)
-            clf.fit(dummy_X, dummy_y[:dummy_X.shape[0]])  # train on subset
-
-            pred_class = clf.predict(dummy_X)[0]
-            pred_prob = clf.predict_proba(dummy_X).max()
-
-            st.write(f"**Predicted class:** {pred_class}")
-            st.write(f"**Probability:** {pred_prob:.2f}")
+            st.info("Image upload detected. Feature extraction not implemented in this demo.")
 
     except Exception as e:
         st.error(f"Error reading CSV or processing data: {e}")
