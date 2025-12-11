@@ -1,74 +1,73 @@
+# app.py
 import streamlit as st
+from PIL import Image
 import numpy as np
-import cv2
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import f1_score, roc_auc_score
-from skimage import io, color
 
-st.title("Parkinson's Spiral Hand Prediction (Image Input)")
+# -------------------------
+# Title
+# -------------------------
+st.title("Parkinson's Spiral Hand Drawing Predictor")
 
-# -------------------------------
-# Step 1: Upload spiral hand image
-# -------------------------------
-uploaded_image = st.file_uploader("Upload Spiral Hand Image", type=["png", "jpg", "jpeg"])
+st.write("""
+Upload an image of a spiral you drew. The app will predict the probability
+of Parkinson's-related tremor based on the drawing.
+""")
 
-if uploaded_image is not None:
-    # Read image as grayscale
-    file_bytes = np.asarray(bytearray(uploaded_image.read()), dtype=np.uint8)
-    img = cv2.imdecode(file_bytes, cv2.IMREAD_GRAYSCALE)
+# -------------------------
+# File uploader
+# -------------------------
+uploaded_file = st.file_uploader("Upload Spiral Image", type=["png", "jpg", "jpeg"])
 
-    st.image(img, caption="Uploaded Spiral Hand", use_column_width=True)
+if uploaded_file:
+    # Open and display the image
+    image = Image.open(uploaded_file).convert("L")  # convert to grayscale
+    st.image(image, caption="Uploaded Image", use_column_width=True)
 
-    # -------------------------------
-    # Step 2: Convert image to features
-    # -------------------------------
-    # Resize to fixed size
-    img_resized = cv2.resize(img, (200, 200))
-
-    # Flatten
-    flat = img_resized.flatten()
+    # Resize to fixed size for feature extraction
+    image = image.resize((100, 100))
+    img_array = np.array(image)
     
-    # Compute features
-    features = {
-        'RMS': np.sqrt(np.mean(flat**2)),
-        'MAX_ET': np.max(flat),
-        'MIN_ET': np.min(flat),
-        'STD_ET': np.std(flat),
-        'MRT': np.mean(flat),
-        'MAX_HT': np.max(np.mean(img_resized, axis=0)),  # max of column means
-        'MIN_HT': np.min(np.mean(img_resized, axis=0)),
-        'STD_HT': np.std(np.mean(img_resized, axis=0)),
-        'CHANGES_ET': np.sum(np.diff((flat>128).astype(int)) != 0)
-    }
+    # -------------------------
+    # Extract simple features
+    # -------------------------
+    # These are just demo features; in a real model, you'd use more sophisticated ones
+    RMS = np.sqrt(np.mean(img_array**2))
+    MAX_VAL = np.max(img_array)
+    MIN_VAL = np.min(img_array)
+    STD_VAL = np.std(img_array)
+    MEAN_VAL = np.mean(img_array)
 
-    st.write("Extracted Features:")
-    st.json(features)
+    features = np.array([[RMS, MAX_VAL, MIN_VAL, STD_VAL, MEAN_VAL]])
 
-    # -------------------------------
-    # Step 3: Train dummy model
-    # -------------------------------
-    # For demonstration, create random dataset
-    np.random.seed(42)
-    X_dummy = np.random.rand(100, 9)
-    y_dummy = np.random.randint(0, 2, 100)
+    st.write("### Extracted Features:")
+    st.write({
+        "RMS": round(RMS, 2),
+        "Max Pixel": int(MAX_VAL),
+        "Min Pixel": int(MIN_VAL),
+        "Std Dev": round(STD_VAL, 2),
+        "Mean Pixel": round(MEAN_VAL, 2)
+    })
 
-    X_train, X_test, y_train, y_test = train_test_split(X_dummy, y_dummy, test_size=0.2, random_state=42)
-
+    # -------------------------
+    # Dummy Model (for demo)
+    # -------------------------
+    # Normally you'd load a pre-trained model
+    # For demo purposes, we train a small Random Forest with random data
+    X_dummy = np.random.rand(50, 5) * 255
+    y_dummy = np.random.randint(0, 2, 50)
     clf = RandomForestClassifier(n_estimators=100, random_state=42)
-    clf.fit(X_train, y_train)
+    clf.fit(X_dummy, y_dummy)
 
-    # -------------------------------
-    # Step 4: Predict
-    # -------------------------------
-    sample = np.array(list(features.values())).reshape(1, -1)
-    pred_class = clf.predict(sample)[0]
-    pred_proba = clf.predict_proba(sample)[0]
+    # Predict probability
+    prob = clf.predict_proba(features)[0]
+    st.write("### Prediction Probabilities:")
+    st.write({
+        "Healthy": f"{prob[0]*100:.2f}%",
+        "Parkinson's": f"{prob[1]*100:.2f}%"
+    })
 
-    class_map = {0: "Healthy", 1: "Parkinson's"}
-    st.subheader("Prediction Result")
-    st.write(f"**Predicted class:** {class_map[pred_class]}")
-    st.write(f"**Probability:** Healthy={pred_proba[0]:.2f}, Parkinson's={pred_proba[1]:.2f}")
-
-else:
-    st.info("Upload a spiral hand image to predict.")
+    # Show the predicted class
+    predicted_class = "Healthy" if prob[0] > prob[1] else "Parkinson's"
+    st.success(f"Predicted Class: {predicted_class}")
