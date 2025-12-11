@@ -1,82 +1,88 @@
-# ==============================
-# Streamlit App: Parkinson's Spiral Prediction from Image
-# ==============================
-
+# app.py
 import streamlit as st
+import pandas as pd
 import numpy as np
-import cv2
 from PIL import Image
 import joblib
+from sklearn.ensemble import RandomForestClassifier
 
-st.title("Parkinson's Spiral Hand Prediction")
-st.write("Upload a spiral drawing image, and the app will predict Parkinson's probability.")
+st.title("Parkinson's Spiral Prediction App")
+st.write("""
+This app predicts the probability of Parkinson's from spiral hand drawings or numeric features.
+You can either upload a **spiral image** or a **CSV file with precomputed features**.
+""")
 
-# ------------------------------
-# Step 1: Load trained model
-# ------------------------------
+# Load pre-trained model
 @st.cache_resource
 def load_model():
-    return joblib.load("handpd_model.pkl")  # Upload your trained model in the same folder
+    return joblib.load("handpd_model.pkl")  # make sure this file is in your repo
 
 clf = load_model()
 
-# ------------------------------
-# Step 2: Upload Image
-# ------------------------------
-uploaded_file = st.file_uploader("Upload a spiral image (PNG/JPG)", type=["png", "jpg", "jpeg"])
+# -------------------------------
+# IMAGE UPLOAD
+# -------------------------------
+st.header("Predict from Spiral Image")
+uploaded_image = st.file_uploader("Upload a spiral image", type=["png","jpg","jpeg"], key="image")
 
-def extract_features(image):
-    """
-    Simple example feature extraction:
-    - RMS: overall intensity variation
-    - MAX_HT / MIN_HT / STD_HT: vertical stroke measures
-    - MRT: rough measure of stroke smoothness
-    You can expand this with more advanced features from OpenCV
-    """
-    # Convert to grayscale
-    gray = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2GRAY)
-    
-    # Flatten pixels for RMS
-    pixels = gray.flatten()
-    RMS = np.sqrt(np.mean(np.square(pixels)))
-    
-    MAX_HT = np.max(pixels)
-    MIN_HT = np.min(pixels)
-    STD_HT = np.std(pixels)
-    
-    # Simplified MRT = mean abs diff of adjacent pixels
-    MRT = np.mean(np.abs(np.diff(pixels)))
-    
-    # Placeholder features for other model inputs (you can replace with better feature extraction)
-    MAX_BETWEEN_ET_HT = RMS / 2
-    MIN_BETWEEN_ET_HT = RMS / 4
-    STD_DEVIATION_ET_HT = STD_HT / 2
-    CHANGES_FROM_NEGATIVE_TO_POSITIVE_BETWEEN_ET_HT = int(np.sum(pixels > 127))  # rough
-    
-    features = np.array([RMS, MAX_BETWEEN_ET_HT, MIN_BETWEEN_ET_HT, STD_DEVIATION_ET_HT,
-                         MRT, MAX_HT, MIN_HT, STD_HT, CHANGES_FROM_NEGATIVE_TO_POSITIVE_BETWEEN_ET_HT]).reshape(1, -1)
-    
-    return features
+if uploaded_image is not None:
+    img = Image.open(uploaded_image).convert("L")  # convert to grayscale
+    st.image(img, caption="Uploaded Spiral", use_column_width=True)
 
-if uploaded_file:
-    image = Image.open(uploaded_file)
-    st.image(image, caption="Uploaded Spiral", use_column_width=True)
-    
-    # ------------------------------
-    # Step 3: Feature Extraction
-    # ------------------------------
-    features = extract_features(image)
-    
-    # ------------------------------
-    # Step 4: Predict
-    # ------------------------------
-    prediction = clf.predict(features)[0]
-    probability = clf.predict_proba(features)[0]
-    
-    class_map = {0: "Healthy", 1: "Parkinson's"}
-    
-    st.subheader("Prediction Result")
-    st.write(f"**Predicted Class:** {class_map[prediction]}")
-    st.write(f"**Probability:** Healthy = {probability[0]:.2f}, Parkinson's = {probability[1]:.2f}")
-else:
-    st.info("Upload a spiral drawing image to get prediction.")
+    # Resize / flatten image to match model input (adjust if your model expects different size/features)
+    img_resized = img.resize((28,28))  # example size
+    img_array = np.array(img_resized).flatten().reshape(1, -1)
+
+    try:
+        pred_prob = clf.predict_proba(img_array)[0]
+        class_map = {0:"Healthy", 1:"Parkinson's"}
+        pred_class = class_map[np.argmax(pred_prob)]
+        st.write(f"**Predicted class:** {pred_class}")
+        st.write(f"**Probability:** Healthy={pred_prob[0]:.2f}, Parkinson's={pred_prob[1]:.2f}")
+    except Exception as e:
+        st.error(f"Prediction failed: {e}")
+
+# -------------------------------
+# CSV FEATURE UPLOAD
+# -------------------------------
+st.header("Predict from CSV Features")
+uploaded_csv = st.file_uploader("Upload CSV with features", type=["csv"], key="csv")
+
+if uploaded_csv is not None:
+    try:
+        df = pd.read_csv(uploaded_csv)
+        st.write("CSV Preview:")
+        st.dataframe(df.head())
+
+        # Required features
+        expected_features = [
+            'RMS', 
+            'MAX_BETWEEN_ET_HT', 
+            'MIN_BETWEEN_ET_HT',
+            'STD_DEVIATION_ET_HT', 
+            'MRT', 
+            'MAX_HT', 
+            'MIN_HT', 
+            'STD_HT', 
+            'CHANGES_FROM_NEGATIVE_TO_POSITIVE_BETWEEN_ET_HT'
+        ]
+
+        missing = [f for f in expected_features if f not in df.columns]
+        if missing:
+            st.error(f"CSV is missing required columns: {missing}")
+        else:
+            X = df[expected_features].values
+            pred_prob = clf.predict_proba(X)
+            class_map = {0:"Healthy", 1:"Parkinson's"}
+
+            results = []
+            for i, prob in enumerate(pred_prob):
+                pred_class = class_map[np.argmax(prob)]
+                results.append({
+                    "Predicted Class": pred_class,
+                    "Healthy Probability": round(prob[0],2),
+                    "Parkinson's Probability": round(prob[1],2)
+                })
+            st.write(pd.DataFrame(results))
+    except Exception as e:
+        st.error(f"Error reading CSV or processing data: {e}")
