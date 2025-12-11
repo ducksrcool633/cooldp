@@ -1,5 +1,6 @@
+
 # ==============================
-# Streamlit App: Parkinson's Spiral Hand Model
+# Streamlit App: Parkinson's Spiral HandPD
 # ==============================
 
 import streamlit as st
@@ -12,137 +13,140 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import f1_score, roc_auc_score, confusion_matrix
 import joblib
 
-st.title("🖊️ Parkinson's Hand Drawing Predictor")
-st.write("Upload a CSV of spiral hand drawings to predict if someone has Parkinson's.")
+st.title("Parkinson's Handwriting Detection")
 
-# ------------------------------
-# Step 1: Upload CSV
-# ------------------------------
-uploaded_file = st.file_uploader("Choose CSV file", type="csv")
+# ==============================
+# 1. Load CSV safely
+# ==============================
+uploaded_file = st.file_uploader("Upload Spiral HandPD CSV", type=["csv"])
 if uploaded_file is not None:
     try:
         df = pd.read_csv(uploaded_file)
-        st.success("CSV loaded successfully!")
-    except Exception as e:
-        st.error(f"Error reading CSV: {e}")
-        st.stop()
-else:
-    st.info("Please upload a CSV to continue.")
-    st.stop()
+    except pd.errors.ParserError:
+        df = pd.read_csv(uploaded_file, header=None)
+        df.columns = [
+            'ID_PATIENT', 'CLASS_TYPE', 'RMS', 'MAX_BETWEEN_ET_HT', 'MIN_BETWEEN_ET_HT',
+            'STD_DEVIATION_ET_HT', 'MRT', 'MAX_HT', 'MIN_HT', 'STD_HT',
+            'CHANGES_FROM_NEGATIVE_TO_POSITIVE_BETWEEN_ET_HT'
+        ]
 
-# ------------------------------
-# Step 2: Clean CSV
-# ------------------------------
-expected_cols = [
-    'ID_PATIENT', 'CLASS_TYPE', 'RMS', 'MAX_BETWEEN_ET_HT', 'MIN_BETWEEN_ET_HT',
-    'STD_DEVIATION_ET_HT', 'MRT', 'MAX_HT', 'MIN_HT', 'STD_HT',
-    'CHANGES_FROM_NEGATIVE_TO_POSITIVE_BETWEEN_ET_HT'
-]
+    # Fix extra unnamed columns if any
+    df = df.iloc[:, :11]
 
-if len(df.columns) != len(expected_cols):
-    st.warning(f"CSV has {len(df.columns)} columns but {len(expected_cols)} expected.")
-    st.write("Columns found:", list(df.columns))
-    st.stop()
+    # ==============================
+    # 2. Rename features for clarity
+    # ==============================
+    rename_map = {
+        'RMS': 'Pen Movement Size',
+        'MAX_BETWEEN_ET_HT': 'Max Time Between Dots',
+        'MIN_BETWEEN_ET_HT': 'Min Time Between Dots',
+        'STD_DEVIATION_ET_HT': 'Time Variability',
+        'MRT': 'Average Tremor',
+        'MAX_HT': 'Max Height',
+        'MIN_HT': 'Min Height',
+        'STD_HT': 'Height Variability',
+        'CHANGES_FROM_NEGATIVE_TO_POSITIVE_BETWEEN_ET_HT': 'Dot Direction Changes'
+    }
+    df.rename(columns=rename_map, inplace=True)
 
-df.columns = expected_cols
+    # Ensure CLASS_TYPE is numeric and mapped
+    if df['CLASS_TYPE'].dtype != np.number:
+        df['CLASS_TYPE'] = pd.to_numeric(df['CLASS_TYPE'], errors='coerce')
+    df.dropna(subset=['CLASS_TYPE'], inplace=True)
+    df['CLASS_TYPE'] = df['CLASS_TYPE'].astype(int) - 1  # 0=Healthy, 1=Parkinson's
 
-# Map CLASS_TYPE to 0=Healthy, 1=Parkinson's if needed
-df['CLASS_TYPE'] = df['CLASS_TYPE'].apply(lambda x: 0 if x==0 else 1)
+    # ==============================
+    # 3. Display basic info
+    # ==============================
+    st.write("### Dataset Preview")
+    st.dataframe(df.head())
+    st.write("### Class Distribution")
+    st.bar_chart(df['CLASS_TYPE'].value_counts())
 
-# ------------------------------
-# Step 3: Define Features
-# ------------------------------
-feature_cols = [
-    'RMS', 
-    'MAX_BETWEEN_ET_HT', 
-    'MIN_BETWEEN_ET_HT',
-    'STD_DEVIATION_ET_HT', 
-    'MRT', 
-    'MAX_HT', 
-    'MIN_HT', 
-    'STD_HT', 
-    'CHANGES_FROM_NEGATIVE_TO_POSITIVE_BETWEEN_ET_HT'
-]
+    # ==============================
+    # 4. Visualizations
+    # ==============================
+    st.write("### Feature Boxplots")
+    numeric_features = list(rename_map.values())
+    num_features = len(numeric_features)
+    cols = 3
+    rows = int(np.ceil(num_features / cols))
 
-# Kid-friendly labels
-feature_names = {
-    'RMS': 'Hand Shake Size',
-    'MAX_BETWEEN_ET_HT': 'Biggest Time Gap',
-    'MIN_BETWEEN_ET_HT': 'Smallest Time Gap',
-    'STD_DEVIATION_ET_HT': 'Time Gap Variation',
-    'MRT': 'Average Tremor Speed',
-    'MAX_HT': 'Biggest Hand Lift',
-    'MIN_HT': 'Smallest Hand Lift',
-    'STD_HT': 'Hand Lift Variation',
-    'CHANGES_FROM_NEGATIVE_TO_POSITIVE_BETWEEN_ET_HT': 'Changes in Hand Movement'
-}
+    fig, axes = plt.subplots(rows, cols, figsize=(12, 4*rows))
+    axes = axes.flatten()
+    for i, feature in enumerate(numeric_features):
+        sns.boxplot(x='CLASS_TYPE', y=feature, data=df, ax=axes[i])
+        means = df.groupby('CLASS_TYPE')[feature].mean().values
+        for cls, mean_val in enumerate(means):
+            axes[i].scatter(cls, mean_val, color='red', marker='D', s=40)
+        axes[i].set_xticklabels(['Healthy', "Parkinson's"])
+        axes[i].set_title(feature)
+    for j in range(i+1, len(axes)):
+        fig.delaxes(axes[j])
+    st.pyplot(fig)
 
-X = df[feature_cols]
-y = df['CLASS_TYPE']
+    # Scatterplot example
+    st.write("### Pen Movement vs Average Tremor")
+    fig2, ax2 = plt.subplots(figsize=(8,6))
+    sns.scatterplot(
+        x='Pen Movement Size',
+        y='Average Tremor',
+        hue='CLASS_TYPE',
+        data=df,
+        palette=['green','orange'],
+        s=50,
+        ax=ax2
+    )
+    ax2.set_xlabel("Pen Movement Size")
+    ax2.set_ylabel("Average Tremor")
+    ax2.set_title("Pen Movement vs Tremor")
+    ax2.legend(labels=['Healthy','Parkinson\'s'])
+    st.pyplot(fig2)
 
-# ------------------------------
-# Step 4: Train/Test Split & Model
-# ------------------------------
-X_train, X_test, y_train, y_test = train_test_split(
-    X, y, test_size=0.2, random_state=42
-)
+    # ==============================
+    # 5. Train Model
+    # ==============================
+    st.write("### Training Random Forest Model...")
+    feature_cols = numeric_features
+    X = df[feature_cols]
+    y = df['CLASS_TYPE']
 
-clf = RandomForestClassifier(n_estimators=200, random_state=42)
-clf.fit(X_train, y_train)
+    # Check if enough data to stratify
+    if len(df['CLASS_TYPE'].value_counts()) < 2:
+        st.error("Not enough data to train the model.")
+    else:
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y, test_size=0.2, random_state=42, stratify=y
+        )
 
-preds = clf.predict(X_test)
-probs = clf.predict_proba(X_test)[:,1]
+        clf = RandomForestClassifier(n_estimators=200, random_state=42)
+        clf.fit(X_train, y_train)
+        preds = clf.predict(X_test)
+        probs = clf.predict_proba(X_test)[:,1]
 
-st.subheader("📊 Model Performance")
-st.write(f"F1 Score: {round(f1_score(y_test, preds), 2)}")
-st.write(f"ROC AUC: {round(roc_auc_score(y_test, probs), 2)}")
-st.write("Confusion Matrix:")
-st.write(confusion_matrix(y_test, preds))
+        st.write("**Model Performance on Test Set:**")
+        st.write(f"F1 Score: {round(f1_score(y_test, preds),3)}")
+        st.write(f"ROC AUC: {round(roc_auc_score(y_test, probs),3)}")
+        st.write("Confusion Matrix:")
+        st.write(confusion_matrix(y_test, preds))
 
-# ------------------------------
-# Step 5: Feature Importance
-# ------------------------------
-importances = clf.feature_importances_
-feat_df = pd.DataFrame({'Feature': [feature_names[f] for f in feature_cols], 'Importance': importances})
-feat_df = feat_df.sort_values(by='Importance', ascending=True)
+        # Save model
+        joblib.dump(clf, "handpd_model.pkl")
+        st.success("Model trained and saved successfully!")
 
-plt.figure(figsize=(8,5))
-plt.barh(feat_df['Feature'], feat_df['Importance'], color='skyblue')
-plt.xlabel("Importance")
-plt.title("Feature Importance (Kid-Friendly)")
-st.pyplot(plt)
+        # ==============================
+        # 6. Predict new sample
+        # ==============================
+        st.write("### Predict New Sample")
+        new_input = {}
+        for feature in feature_cols:
+            val = st.number_input(f"Enter {feature}", value=0.0)
+            new_input[feature] = [val]
 
-# ------------------------------
-# Step 6: Plot simple boxplots
-# ------------------------------
-st.subheader("📈 Feature Comparison by Class")
-for col in feature_cols:
-    plt.figure(figsize=(6,4))
-    sns.boxplot(x='CLASS_TYPE', y=col, data=df, palette=['green','orange'])
-    plt.xticks([0,1], ['Healthy','Parkinson\'s'])
-    plt.ylabel(feature_names[col])
-    plt.title(f"{feature_names[col]} by Class")
-    st.pyplot(plt)
-
-# ------------------------------
-# Step 7: Predict New Sample
-# ------------------------------
-st.subheader("🖊️ Predict a New Drawing")
-st.write("Enter your new sample measurements below:")
-
-new_data = {}
-for col in feature_cols:
-    new_data[col] = st.number_input(feature_names[col], value=float(df[col].mean()))
-
-if st.button("Predict"):
-    new_sample = pd.DataFrame([new_data])
-    prediction = clf.predict(new_sample)[0]
-    probability = clf.predict_proba(new_sample)[0]
-    class_map = {0: "Healthy", 1: "Parkinson's"}
-    st.success(f"Predicted class: {class_map[prediction]}")
-    st.info(f"Probability - Healthy: {probability[0]:.2f}, Parkinson's: {probability[1]:.2f}")
-
-# ------------------------------
-# Step 8: Save Model (optional)
-# ------------------------------
-joblib.dump(clf, "handpd_model.pkl")
+        if st.button("Predict"):
+            new_df = pd.DataFrame(new_input)
+            prediction = clf.predict(new_df)[0]
+            probability = clf.predict_proba(new_df)[0]
+            class_map = {0:"Healthy",1:"Parkinson's"}
+            st.write(f"**Predicted class:** {class_map[prediction]}")
+            st.write(f"Probability: Healthy={probability[0]:.2f}, Parkinson's={probability[1]:.2f}")
