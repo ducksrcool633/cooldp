@@ -1,73 +1,95 @@
-# app.py
 import streamlit as st
-from PIL import Image
+import pandas as pd
 import numpy as np
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
+from sklearn.metrics import f1_score, roc_auc_score, confusion_matrix
 
-# -------------------------
-# Title
-# -------------------------
-st.title("Parkinson's Spiral Hand Drawing Predictor")
+st.title("Parkinson's Spiral Hand Prediction")
 
-st.write("""
-Upload an image of a spiral you drew. The app will predict the probability
-of Parkinson's-related tremor based on the drawing.
-""")
+# ===========================
+# Upload CSV
+# ===========================
+uploaded_file = st.file_uploader("Upload your CSV file", type=["csv", "txt"])
 
-# -------------------------
-# File uploader
-# -------------------------
-uploaded_file = st.file_uploader("Upload Spiral Image", type=["png", "jpg", "jpeg"])
-
-if uploaded_file:
-    # Open and display the image
-    image = Image.open(uploaded_file).convert("L")  # convert to grayscale
-    st.image(image, caption="Uploaded Image", use_column_width=True)
-
-    # Resize to fixed size for feature extraction
-    image = image.resize((100, 100))
-    img_array = np.array(image)
+if uploaded_file is not None:
+    try:
+        df = pd.read_csv(uploaded_file)
+    except Exception as e:
+        st.error(f"Error reading CSV: {e}")
+        st.stop()
     
-    # -------------------------
-    # Extract simple features
-    # -------------------------
-    # These are just demo features; in a real model, you'd use more sophisticated ones
-    RMS = np.sqrt(np.mean(img_array**2))
-    MAX_VAL = np.max(img_array)
-    MIN_VAL = np.min(img_array)
-    STD_VAL = np.std(img_array)
-    MEAN_VAL = np.mean(img_array)
-
-    features = np.array([[RMS, MAX_VAL, MIN_VAL, STD_VAL, MEAN_VAL]])
-
-    st.write("### Extracted Features:")
-    st.write({
-        "RMS": round(RMS, 2),
-        "Max Pixel": int(MAX_VAL),
-        "Min Pixel": int(MIN_VAL),
-        "Std Dev": round(STD_VAL, 2),
-        "Mean Pixel": round(MEAN_VAL, 2)
-    })
-
-    # -------------------------
-    # Dummy Model (for demo)
-    # -------------------------
-    # Normally you'd load a pre-trained model
-    # For demo purposes, we train a small Random Forest with random data
-    X_dummy = np.random.rand(50, 5) * 255
-    y_dummy = np.random.randint(0, 2, 50)
-    clf = RandomForestClassifier(n_estimators=100, random_state=42)
-    clf.fit(X_dummy, y_dummy)
-
-    # Predict probability
-    prob = clf.predict_proba(features)[0]
-    st.write("### Prediction Probabilities:")
-    st.write({
-        "Healthy": f"{prob[0]*100:.2f}%",
-        "Parkinson's": f"{prob[1]*100:.2f}%"
-    })
-
-    # Show the predicted class
-    predicted_class = "Healthy" if prob[0] > prob[1] else "Parkinson's"
-    st.success(f"Predicted Class: {predicted_class}")
+    # ===========================
+    # Check columns
+    # ===========================
+    expected_cols = [
+        'ID_PATIENT', 'CLASS_TYPE', 'RMS', 'MAX_BETWEEN_ET_HT',
+        'MIN_BETWEEN_ET_HT', 'STD_DEVIATION_ET_HT', 'MRT', 'MAX_HT',
+        'MIN_HT', 'STD_HT', 'CHANGES_FROM_NEGATIVE_TO_POSITIVE_BETWEEN_ET_HT'
+    ]
+    
+    if not all(col in df.columns for col in expected_cols):
+        st.error(f"CSV missing required columns! Found: {list(df.columns)}")
+        st.stop()
+    
+    # ===========================
+    # Convert to numeric
+    # ===========================
+    df_numeric = df.copy()
+    for col in expected_cols:
+        df_numeric[col] = pd.to_numeric(df_numeric[col], errors='coerce')
+    
+    # Drop rows with NaN
+    df_numeric.dropna(inplace=True)
+    
+    # ===========================
+    # Check sample size
+    # ===========================
+    counts = df_numeric['CLASS_TYPE'].value_counts()
+    if (counts < 2).any():
+        st.error(f"Each class must have at least 2 samples. Counts: {counts.to_dict()}")
+        st.stop()
+    
+    # ===========================
+    # Split features and labels
+    # ===========================
+    feature_cols = [
+        'RMS', 'MAX_BETWEEN_ET_HT', 'MIN_BETWEEN_ET_HT',
+        'STD_DEVIATION_ET_HT', 'MRT', 'MAX_HT', 'MIN_HT',
+        'STD_HT', 'CHANGES_FROM_NEGATIVE_TO_POSITIVE_BETWEEN_ET_HT'
+    ]
+    
+    X = df_numeric[feature_cols]
+    y = df_numeric['CLASS_TYPE']
+    
+    # ===========================
+    # Train model
+    # ===========================
+    try:
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y, test_size=0.2, random_state=42, stratify=y
+        )
+        clf = RandomForestClassifier(n_estimators=200, random_state=42)
+        clf.fit(X_train, y_train)
+    except Exception as e:
+        st.error(f"Error training model: {e}")
+        st.stop()
+    
+    st.success("Model trained successfully!")
+    
+    # ===========================
+    # Prediction feature
+    # ===========================
+    st.header("Predict New Sample")
+    
+    new_sample_dict = {}
+    for feature in feature_cols:
+        new_sample_dict[feature] = st.number_input(f"{feature}", value=0.0)
+    
+    if st.button("Predict"):
+        new_sample = pd.DataFrame([new_sample_dict])
+        prediction = clf.predict(new_sample)[0]
+        probability = clf.predict_proba(new_sample)[0]
+        class_map = {0: "Healthy", 1: "Parkinson's"}
+        st.write(f"**Predicted class:** {class_map.get(prediction, prediction)}")
+        st.write(f"**Probability:** Healthy={probability[0]:.2f}, Parkinson's={probability[1]:.2f}")
