@@ -4,88 +4,104 @@ import numpy as np
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import f1_score, roc_auc_score, confusion_matrix
+import matplotlib.pyplot as plt
+import seaborn as sns
+import joblib
 
-st.title("HandPD Parkinson's Prediction App 🖐️")
+st.title("🖊️ Parkinson's Spiral Hand Detection")
 
 # --- Step 1: Upload CSV ---
-uploaded_file = st.file_uploader("Upload Spiral_HandPD CSV file", type="csv")
-
+uploaded_file = st.file_uploader("Upload your Spiral HandPD CSV", type=["csv"])
 if uploaded_file is not None:
-    # --- Step 2: Force column names ---
-    expected_cols = [
-        'ID_PATIENT',
-        'CLASS_TYPE',
-        'RMS',
-        'MAX_BETWEEN_ET_HT',
-        'MIN_BETWEEN_ET_HT',
-        'STD_DEVIATION_ET_HT',
-        'MRT',
-        'MAX_HT',
-        'MIN_HT',
-        'STD_HT',
-        'CHANGES_FROM_NEGATIVE_TO_POSITIVE_BETWEEN_ET_HT'
-    ]
-    
-    spiral_df = pd.read_csv(uploaded_file, header=None)
-    
-    if spiral_df.shape[1] != len(expected_cols):
-        st.error(f"CSV has {spiral_df.shape[1]} columns but {len(expected_cols)} expected!")
-        st.stop()
-    
-    spiral_df.columns = expected_cols
+    try:
+        # Load CSV without assuming headers
+        spiral_df = pd.read_csv(uploaded_file, header=None)
+        spiral_df = spiral_df.dropna(axis=1, how='all')  # Remove empty columns
 
-    # --- Step 3: Prepare data ---
-    spiral_df['CLASS_TYPE'] = spiral_df['CLASS_TYPE'] - 1  # 0 = Healthy, 1 = Parkinson's
-    feature_cols = expected_cols[2:]  # all numeric features
-    X = spiral_df[feature_cols]
-    y = spiral_df['CLASS_TYPE']
-
-    # --- Step 4: Train/test split ---
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, random_state=42, stratify=y
-    )
-
-    # --- Step 5: Train model ---
-    clf = RandomForestClassifier(n_estimators=200, random_state=42)
-    clf.fit(X_train, y_train)
-
-    # --- Step 6: Evaluate model ---
-    preds = clf.predict(X_test)
-    probs = clf.predict_proba(X_test)[:, 1]
-
-    st.subheader("Model Performance on Test Set")
-    st.write("F1 Score:", round(f1_score(y_test, preds), 3))
-    st.write("ROC AUC:", round(roc_auc_score(y_test, probs), 3))
-    st.write("Confusion Matrix:")
-    st.write(confusion_matrix(y_test, preds))
-
-    # --- Step 7: Predict new sample ---
-    st.subheader("Predict a New Sample")
-    st.write("Enter values for each feature:")
-
-    new_sample = pd.DataFrame({
-        'RMS': [st.number_input("RMS", value=1200)],
-        'MAX_BETWEEN_ET_HT': [st.number_input("MAX_BETWEEN_ET_HT", value=30)],
-        'MIN_BETWEEN_ET_HT': [st.number_input("MIN_BETWEEN_ET_HT", value=5)],
-        'STD_DEVIATION_ET_HT': [st.number_input("STD_DEVIATION_ET_HT", value=12)],
-        'MRT': [st.number_input("MRT", value=0.8)],
-        'MAX_HT': [st.number_input("MAX_HT", value=150)],
-        'MIN_HT': [st.number_input("MIN_HT", value=20)],
-        'STD_HT': [st.number_input("STD_HT", value=25)],
-        'CHANGES_FROM_NEGATIVE_TO_POSITIVE_BETWEEN_ET_HT': [
-            st.number_input("CHANGES_FROM_NEGATIVE_TO_POSITIVE_BETWEEN_ET_HT", value=10)
+        # Check if column count matches expected
+        expected_cols = [
+            'ID_PATIENT',
+            'CLASS_TYPE',
+            'RMS',
+            'MAX_BETWEEN_ET_HT',
+            'MIN_BETWEEN_ET_HT',
+            'STD_DEVIATION_ET_HT',
+            'MRT',
+            'MAX_HT',
+            'MIN_HT',
+            'STD_HT',
+            'CHANGES_FROM_NEGATIVE_TO_POSITIVE_BETWEEN_ET_HT'
         ]
-    })
 
-    if st.button("Predict"):
-        prediction = clf.predict(new_sample)
+        if spiral_df.shape[1] != len(expected_cols):
+            st.error(f"CSV has {spiral_df.shape[1]} columns but {len(expected_cols)} expected. Please check your file.")
+            st.stop()
+
+        # Assign proper column names
+        spiral_df.columns = expected_cols
+
+        st.success("CSV loaded successfully!")
+        st.write("First 5 rows:")
+        st.dataframe(spiral_df.head())
+
+        # --- Step 2: Data Visualization ---
+        numeric_features = expected_cols[2:]  # all features except ID and CLASS_TYPE
+
+        st.subheader("📊 Feature Distributions by Class")
+        for feature in numeric_features:
+            plt.figure(figsize=(5,3))
+            sns.boxplot(x='CLASS_TYPE', y=feature, data=spiral_df, showfliers=True)
+            means = spiral_df.groupby('CLASS_TYPE')[feature].mean().values
+            for cls, mean_val in enumerate(means):
+                plt.scatter(cls, mean_val, color='red', marker='D', s=40)
+            plt.xticks([0,1], ['Healthy','Parkinson\'s'])
+            plt.title(f"{feature} by Class")
+            plt.xlabel("Class")
+            plt.ylabel(feature)
+            st.pyplot(plt)
+            plt.clf()
+
+        # --- Step 3: Model Training ---
+        X = spiral_df[numeric_features]
+        y = spiral_df['CLASS_TYPE']
+
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y, test_size=0.2, random_state=42, stratify=y
+        )
+
+        clf = RandomForestClassifier(n_estimators=200, random_state=42)
+        clf.fit(X_train, y_train)
+
+        preds = clf.predict(X_test)
+        probs = clf.predict_proba(X_test)[:,1]
+
+        st.subheader("🎯 Model Performance")
+        st.write(f"F1 Score: {f1_score(y_test, preds):.3f}")
+        st.write(f"ROC AUC: {roc_auc_score(y_test, probs):.3f}")
+        st.write("Confusion Matrix:")
+        st.write(confusion_matrix(y_test, preds))
+
+        # --- Step 4: Predict New Sample ---
+        st.subheader("📝 Predict New Sample")
+        st.write("Enter values for a new drawing:")
+
+        new_data = {}
+        for feature in numeric_features:
+            new_data[feature] = [st.number_input(feature, value=float(spiral_df[feature].mean()))]
+
+        new_sample = pd.DataFrame(new_data)
+        prediction = clf.predict(new_sample)[0]
         probability = clf.predict_proba(new_sample)[0]
 
         class_map = {0: "Healthy", 1: "Parkinson's"}
-        st.write(f"**Predicted class:** {class_map[int(prediction[0])]}")
+        st.write(f"**Predicted class:** {class_map[prediction]}")
         st.write(f"**Probability:** Healthy={probability[0]:.2f}, Parkinson's={probability[1]:.2f}")
 
-    st.success("✅ App is ready! Upload CSV and try predictions.")
+        # Optional: save model
+        joblib.dump(clf, "handpd_model.pkl")
 
+    except Exception as e:
+        st.error(f"Error reading CSV: {e}")
 else:
-    st.info("Please upload the Spiral_HandPD CSV file to start.")
+    st.info("Please upload your CSV to start!")
+
