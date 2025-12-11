@@ -3,93 +3,93 @@ import pandas as pd
 import numpy as np
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import f1_score, roc_auc_score, confusion_matrix
+from sklearn.preprocessing import LabelEncoder
 
-st.title("Parkinson's Spiral Hand Prediction")
+st.title("Hand Tremor Prediction App")
 
-# ===========================
-# Upload CSV
-# ===========================
-uploaded_file = st.file_uploader("Upload your CSV file", type=["csv", "txt"])
+# Expected columns
+expected_cols = [
+    'ID_PATIENT', 'CLASS_TYPE', 'RMS', 'MAX_BETWEEN_ET_HT',
+    'MIN_BETWEEN_ET_HT', 'STD_DEVIATION_ET_HT', 'MRT', 'MAX_HT',
+    'MIN_HT', 'STD_HT', 'CHANGES_FROM_NEGATIVE_TO_POSITIVE_BETWEEN_ET_HT'
+]
+
+st.header("Upload CSV or Image")
+
+uploaded_file = st.file_uploader("Upload CSV or image", type=["csv","png","jpg","jpeg"])
 
 if uploaded_file is not None:
     try:
-        df = pd.read_csv(uploaded_file)
+        if uploaded_file.name.endswith(".csv"):
+            df = pd.read_csv(uploaded_file)
+
+            # Automatically rename columns if count matches expected
+            if df.shape[1] == len(expected_cols):
+                df.columns = expected_cols
+            else:
+                st.error(f"CSV has {df.shape[1]} columns but {len(expected_cols)} expected. Please check your file.")
+                st.stop()
+
+            # Check required columns
+            missing_cols = [c for c in expected_cols if c not in df.columns]
+            if missing_cols:
+                st.error(f"CSV missing required columns: {missing_cols}")
+                st.stop()
+
+            # Check class counts
+            class_counts = df['CLASS_TYPE'].value_counts()
+            low_classes = class_counts[class_counts < 2]
+            if not low_classes.empty:
+                st.warning(f"Some classes have less than 2 samples. They will be removed: {list(low_classes.index)}")
+                df = df[~df['CLASS_TYPE'].isin(low_classes.index)]
+
+            X = df.drop(['ID_PATIENT', 'CLASS_TYPE'], axis=1)
+            y = df['CLASS_TYPE']
+
+            # Encode if needed
+            if y.dtype == 'object':
+                le = LabelEncoder()
+                y = le.fit_transform(y)
+
+            # Train simple model
+            clf = RandomForestClassifier(n_estimators=100, random_state=42)
+            clf.fit(X, y)
+
+            st.success("Model trained on your CSV data!")
+
+            st.subheader("Predictions on uploaded CSV")
+            y_pred = clf.predict(X)
+            y_prob = clf.predict_proba(X)
+
+            pred_df = pd.DataFrame({
+                "Patient_ID": df['ID_PATIENT'],
+                "Predicted_Class": y_pred,
+                "Probability": [np.max(p) for p in y_prob]
+            })
+            st.dataframe(pred_df)
+
+        else:
+            # Placeholder for image conversion
+            st.info("Image uploaded. Currently, image conversion to features is simulated.")
+
+            # Simulate feature extraction
+            dummy_features = np.random.rand(1, 9)  # 9 features matching numeric columns
+            dummy_X = pd.DataFrame(dummy_features, columns=[
+                'RMS','MAX_BETWEEN_ET_HT','MIN_BETWEEN_ET_HT',
+                'STD_DEVIATION_ET_HT','MRT','MAX_HT','MIN_HT','STD_HT',
+                'CHANGES_FROM_NEGATIVE_TO_POSITIVE_BETWEEN_ET_HT'
+            ])
+
+            # Train dummy model on dummy data
+            dummy_y = np.array([0,1,0,1,0,1,0,1,0,1])
+            clf = RandomForestClassifier(n_estimators=100, random_state=42)
+            clf.fit(dummy_X, dummy_y[:dummy_X.shape[0]])  # train on subset
+
+            pred_class = clf.predict(dummy_X)[0]
+            pred_prob = clf.predict_proba(dummy_X).max()
+
+            st.write(f"**Predicted class:** {pred_class}")
+            st.write(f"**Probability:** {pred_prob:.2f}")
+
     except Exception as e:
-        st.error(f"Error reading CSV: {e}")
-        st.stop()
-    
-    # ===========================
-    # Check columns
-    # ===========================
-    expected_cols = [
-        'ID_PATIENT', 'CLASS_TYPE', 'RMS', 'MAX_BETWEEN_ET_HT',
-        'MIN_BETWEEN_ET_HT', 'STD_DEVIATION_ET_HT', 'MRT', 'MAX_HT',
-        'MIN_HT', 'STD_HT', 'CHANGES_FROM_NEGATIVE_TO_POSITIVE_BETWEEN_ET_HT'
-    ]
-    
-    if not all(col in df.columns for col in expected_cols):
-        st.error(f"CSV missing required columns! Found: {list(df.columns)}")
-        st.stop()
-    
-    # ===========================
-    # Convert to numeric
-    # ===========================
-    df_numeric = df.copy()
-    for col in expected_cols:
-        df_numeric[col] = pd.to_numeric(df_numeric[col], errors='coerce')
-    
-    # Drop rows with NaN
-    df_numeric.dropna(inplace=True)
-    
-    # ===========================
-    # Check sample size
-    # ===========================
-    counts = df_numeric['CLASS_TYPE'].value_counts()
-    if (counts < 2).any():
-        st.error(f"Each class must have at least 2 samples. Counts: {counts.to_dict()}")
-        st.stop()
-    
-    # ===========================
-    # Split features and labels
-    # ===========================
-    feature_cols = [
-        'RMS', 'MAX_BETWEEN_ET_HT', 'MIN_BETWEEN_ET_HT',
-        'STD_DEVIATION_ET_HT', 'MRT', 'MAX_HT', 'MIN_HT',
-        'STD_HT', 'CHANGES_FROM_NEGATIVE_TO_POSITIVE_BETWEEN_ET_HT'
-    ]
-    
-    X = df_numeric[feature_cols]
-    y = df_numeric['CLASS_TYPE']
-    
-    # ===========================
-    # Train model
-    # ===========================
-    try:
-        X_train, X_test, y_train, y_test = train_test_split(
-            X, y, test_size=0.2, random_state=42, stratify=y
-        )
-        clf = RandomForestClassifier(n_estimators=200, random_state=42)
-        clf.fit(X_train, y_train)
-    except Exception as e:
-        st.error(f"Error training model: {e}")
-        st.stop()
-    
-    st.success("Model trained successfully!")
-    
-    # ===========================
-    # Prediction feature
-    # ===========================
-    st.header("Predict New Sample")
-    
-    new_sample_dict = {}
-    for feature in feature_cols:
-        new_sample_dict[feature] = st.number_input(f"{feature}", value=0.0)
-    
-    if st.button("Predict"):
-        new_sample = pd.DataFrame([new_sample_dict])
-        prediction = clf.predict(new_sample)[0]
-        probability = clf.predict_proba(new_sample)[0]
-        class_map = {0: "Healthy", 1: "Parkinson's"}
-        st.write(f"**Predicted class:** {class_map.get(prediction, prediction)}")
-        st.write(f"**Probability:** Healthy={probability[0]:.2f}, Parkinson's={probability[1]:.2f}")
+        st.error(f"Error reading CSV or processing data: {e}")
