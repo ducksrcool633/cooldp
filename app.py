@@ -14,11 +14,10 @@ st.title("🖊️ Parkinson's Spiral Hand Detection")
 uploaded_file = st.file_uploader("Upload your Spiral HandPD CSV", type=["csv"])
 if uploaded_file is not None:
     try:
-        # Load CSV without assuming headers
-        spiral_df = pd.read_csv(uploaded_file, header=None)
-        spiral_df = spiral_df.dropna(axis=1, how='all')  # Remove empty columns
-
-        # Check if column count matches expected
+        # Load CSV, ignore extra columns
+        spiral_df = pd.read_csv(uploaded_file)
+        
+        # Keep only the columns we need
         expected_cols = [
             'ID_PATIENT',
             'CLASS_TYPE',
@@ -33,18 +32,18 @@ if uploaded_file is not None:
             'CHANGES_FROM_NEGATIVE_TO_POSITIVE_BETWEEN_ET_HT'
         ]
 
-        if spiral_df.shape[1] != len(expected_cols):
-            st.error(f"CSV has {spiral_df.shape[1]} columns but {len(expected_cols)} expected. Please check your file.")
+        missing_cols = [col for col in expected_cols if col not in spiral_df.columns]
+        if missing_cols:
+            st.error(f"CSV is missing required columns: {missing_cols}")
             st.stop()
 
-        # Assign proper column names
-        spiral_df.columns = expected_cols
+        spiral_df = spiral_df[expected_cols]  # keep only expected columns
 
         st.success("CSV loaded successfully!")
         st.write("First 5 rows:")
         st.dataframe(spiral_df.head())
 
-        # --- Step 2: Data Visualization ---
+        # --- Step 2: Feature Visualization ---
         numeric_features = expected_cols[2:]  # all features except ID and CLASS_TYPE
 
         st.subheader("📊 Feature Distributions by Class")
@@ -104,4 +103,3 @@ if uploaded_file is not None:
         st.error(f"Error reading CSV: {e}")
 else:
     st.info("Please upload your CSV to start!")
-
