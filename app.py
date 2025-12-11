@@ -1,4 +1,8 @@
-# app.py
+# ==============================================
+# Streamlit App: Parkinson's Spiral HandPD Predictor
+# Fully self-contained and safe for CSV uploads
+# ==============================================
+
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -6,63 +10,112 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import f1_score, roc_auc_score, confusion_matrix
 
-st.title("Parkinson's Hand Tremor Prediction")
+# -------------------------------
+# Set Streamlit page config
+# -------------------------------
+st.set_page_config(page_title="Parkinson's HandPD Predictor", layout="wide")
 
-# --- Step 1: Upload Dataset ---
-st.info("Upload the dataset CSV (Spiral_HandPD.csv) to train the model.")
-data_file = st.file_uploader("Upload training CSV", type=["csv"])
+st.title("Parkinson's Spiral HandPD Predictor")
+st.write("Upload your CSV dataset to train the model and predict new samples.")
+
+# -------------------------------
+# Expected columns
+# -------------------------------
+expected_cols = [
+    'ID_PATIENT','CLASS_TYPE','RMS','MAX_BETWEEN_ET_HT','MIN_BETWEEN_ET_HT',
+    'STD_DEVIATION_ET_HT','MRT','MAX_HT','MIN_HT','STD_HT',
+    'CHANGES_FROM_NEGATIVE_TO_POSITIVE_BETWEEN_ET_HT'
+]
+
+# -------------------------------
+# Upload CSV
+# -------------------------------
+data_file = st.file_uploader("Upload your dataset CSV", type=["csv"])
 
 if data_file is not None:
     try:
+        # Try reading with headers first
         df = pd.read_csv(data_file)
-        st.success("Dataset loaded successfully!")
+        if list(df.columns) != expected_cols:
+            # CSV likely has no header or wrong headers; force correct headers
+            data_file.seek(0)
+            df = pd.read_csv(data_file, header=None)
+            df.columns = expected_cols
+
+        st.success("CSV loaded successfully!")
+
+        # Show basic dataset info
+        st.subheader("Dataset Preview")
+        st.dataframe(df.head())
+
+        st.subheader("Class Distribution")
+        st.bar_chart(df['CLASS_TYPE'].value_counts())
+
+        # -------------------------------
+        # Train/Test Split
+        # -------------------------------
+        numeric_features = expected_cols[2:]  # All numeric columns
+        X = df[numeric_features]
+        y = df['CLASS_TYPE']
+
+        # Simple check: need at least 2 samples per class
+        if min(y.value_counts()) < 2:
+            st.error("Each class must have at least 2 samples to train the model.")
+        else:
+            X_train, X_test, y_train, y_test = train_test_split(
+                X, y, test_size=0.2, random_state=42, stratify=y
+            )
+
+            # -------------------------------
+            # Train Random Forest Model
+            # -------------------------------
+            clf = RandomForestClassifier(n_estimators=200, random_state=42)
+            clf.fit(X_train, y_train)
+
+            # -------------------------------
+            # Evaluate Model
+            # -------------------------------
+            preds = clf.predict(X_test)
+            probs = clf.predict_proba(X_test)[:,1]
+
+            st.subheader("Model Evaluation")
+            st.write(f"F1 Score: {f1_score(y_test, preds):.3f}")
+            st.write(f"ROC AUC: {roc_auc_score(y_test, probs):.3f}")
+            st.write("Confusion Matrix:")
+            st.write(confusion_matrix(y_test, preds))
+
+            # -------------------------------
+            # Predict New Sample
+            # -------------------------------
+            st.subheader("Predict New Sample")
+            st.write("Upload a new CSV with the same feature columns (no CLASS_TYPE needed).")
+
+            sample_file = st.file_uploader("Upload new sample CSV", type=["csv"], key="sample")
+
+            if sample_file is not None:
+                try:
+                    sample_df = pd.read_csv(sample_file)
+                    if list(sample_df.columns) != numeric_features:
+                        # Force columns if missing
+                        sample_df = pd.read_csv(sample_file, header=None)
+                        sample_df.columns = numeric_features
+
+                    pred = clf.predict(sample_df)
+                    prob = clf.predict_proba(sample_df)
+
+                    class_map = {0: "Healthy", 1: "Parkinson's"}
+
+                    st.write("### Predictions")
+                    for i in range(len(sample_df)):
+                        st.write(f"Sample {i+1}:")
+                        st.write(f"Predicted class: {class_map[pred[i]]}")
+                        st.write(f"Probability: Healthy={prob[i][0]:.2f}, Parkinson's={prob[i][1]:.2f}")
+
+                except Exception as e:
+                    st.error(f"Error reading new sample CSV: {e}")
+
     except Exception as e:
-        st.error(f"Error reading CSV: {e}")
-        st.stop()
-    
-    # Check expected columns
-    expected_cols = [
-        'ID_PATIENT','CLASS_TYPE','RMS','MAX_BETWEEN_ET_HT','MIN_BETWEEN_ET_HT',
-        'STD_DEVIATION_ET_HT','MRT','MAX_HT','MIN_HT','STD_HT',
-        'CHANGES_FROM_NEGATIVE_TO_POSITIVE_BETWEEN_ET_HT'
-    ]
-    
-    if not all(col in df.columns for col in expected_cols):
-        st.error(f"CSV missing required columns! Found: {list(df.columns)}")
-        st.stop()
-    
-    # Map CLASS_TYPE: 0 = Healthy, 1 = Parkinson's
-    df['CLASS_TYPE'] = df['CLASS_TYPE'].astype(int) - 1
-    
-    # Features & labels
-    feature_cols = expected_cols[2:]  # All columns except ID and CLASS_TYPE
-    X = df[feature_cols]
-    y = df['CLASS_TYPE']
-    
-    # Train model
-    clf = RandomForestClassifier(n_estimators=200, random_state=42)
-    clf.fit(X, y)
-    st.success("Model trained successfully!")
-    
-    # --- Step 2: Predict new sample ---
-    st.header("Predict a new sample")
-    st.info("Upload a CSV with a single row containing the same features as training data (without ID_PATIENT or CLASS_TYPE).")
-    sample_file = st.file_uploader("Upload new sample CSV", type=["csv"], key="sample")
-    
-    if sample_file is not None:
-        try:
-            new_sample = pd.read_csv(sample_file)
-            
-            # Ensure correct columns
-            if not all(col in feature_cols for col in new_sample.columns):
-                st.error(f"New sample CSV must have columns: {feature_cols}")
-                st.stop()
-            
-            prediction = clf.predict(new_sample)[0]
-            probability = clf.predict_proba(new_sample)[0]
-            class_map = {0: "Healthy", 1: "Parkinson's"}
-            
-            st.write(f"**Predicted class:** {class_map[prediction]}")
-            st.write(f"**Probability:** Healthy={probability[0]:.2f}, Parkinson's={probability[1]:.2f}")
-        except Exception as e:
-            st.error(f"Error processing new sample: {e}")
+        st.error(f"Error reading CSV or processing data: {e}")
+
+else:
+    st.info("Please upload a CSV to continue.")
